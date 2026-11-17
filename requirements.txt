@@ -1,0 +1,7 @@
+streamlit==1.57.0
+pandas==3.0.3
+requests==2.34.2
+openai==2.38.0
+playwright>=1.48,<2
+google-cloud-bigquery>=3.25,<4
+google-auth>=2.35,<3

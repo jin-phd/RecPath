@@ -1,0 +1,25 @@
+[server]
+# Only this computer can open the app. Without this, anyone on the same network
+# (e.g. campus Wi-Fi) could open it, start crawls and use your API keys.
+address = "localhost"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+# Calm and readable: a light base with one restrained accent (steel blue).
+base = "light"
+primaryColor = "#2E5E8C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F9"
+textColor = "#1F2933"
+borderColor = "#DDE2E8"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+font = "sans-serif"
+codeFont = "monospace"
+# Validated categorical order (colour-blind safe on adjacent pairs) for the Compare charts.
+chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]

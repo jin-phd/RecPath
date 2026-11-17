@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/*
+!.streamlit/config.toml
+!.streamlit/secrets.example.toml
+.env*
+*service-account*.json
+*credentials*.json
+.playwright-browsers/
+data/sessions/*.json
+data/sessions/*.csv
+data/screenshots/*.png
+data/screenshots/*.jpg
+data/sessions/.*.tmp
+.DS_Store
+data/batches/
