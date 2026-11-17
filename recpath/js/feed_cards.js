@@ -9,8 +9,11 @@
   //   mode "link":    a visible link element for videoId, so Python can tap it
   //   mode "mark":    scroll the card for videoId into view and outline it for the "selected" screenshot
   //   mode "unmark":  remove that outline again
+  // yt-lockup-view-model is YouTube's newer video card; some visitors get it in place of
+  // ytm-video-with-context-renderer on search and watch pages.
+  const LOCKUP = "yt-lockup-view-model";
   const CARD = [
-    "ytm-video-with-context-renderer", "ytm-compact-video-renderer",
+    "ytm-video-with-context-renderer", "ytm-compact-video-renderer", LOCKUP,
     "ytm-shorts-lockup-view-model", "ytm-shorts-lockup-view-model-v2", "ytm-reel-item-renderer",
     "ytm-compact-playlist-renderer", "ytm-compact-radio-renderer", "ytm-compact-channel-renderer",
     "ytm-compact-movie-renderer", "ytm-movie-renderer",
@@ -140,8 +143,15 @@
     if (rect.width === 0 || rect.height === 0) continue;
     const href = a ? a.getAttribute("href") : null;
     const url = href ? new URL(href, location.href) : null;
-    const timeEl = card.querySelector("ytm-thumbnail-overlay-time-status-renderer");
-    const timeStyle = timeEl ? timeEl.getAttribute("data-style") : null;
+    // A lockup shows the duration (or LIVE / UPCOMING) as a badge on the thumbnail instead.
+    const lockupTime = tag === LOCKUP
+      ? Array.from(card.querySelectorAll("yt-thumbnail-badge-view-model badge-shape"))
+        .find((badge) => /^((\d+:)?\d{1,2}:\d{2}|live|upcoming)$/i.test(text(badge) || "")) || null
+      : null;
+    const timeEl = card.querySelector("ytm-thumbnail-overlay-time-status-renderer") || lockupTime;
+    const timeStyle = lockupTime
+      ? (/^(live|upcoming)$/i.test(text(lockupTime)) ? text(lockupTime).toUpperCase() : "DEFAULT")
+      : timeEl ? timeEl.getAttribute("data-style") : null;
     const badges = Array.from(card.querySelectorAll("badge-shape"))
       .map((badge) => badge.getAttribute("aria-label") || text(badge))
       .filter(Boolean);
@@ -156,6 +166,8 @@
     // Ordinary videos often link with &list=RD<id>&start_radio=1; only a card without a
     // duration overlay (or a radio renderer) is a Mix.
     else if (tag.includes("radio") || (!timeEl && url && (url.searchParams.get("list") || "").startsWith("RD"))) label = "mix";
+    // A lockup for a playlist links to it (or to its first video with &list=) and has no duration.
+    else if (tag === LOCKUP && !timeEl && url && (url.pathname === "/playlist" || url.searchParams.get("list"))) label = "playlist";
     else if (tag.includes("channel")) label = "channel";
     else if (tag.includes("movie") || badges.some((b) => /preview only|buy or rent|free with ads/i.test(b))) label = "movie";
     else if (timeStyle === "LIVE") label = "live";
@@ -166,7 +178,9 @@
     const lockupChannel = card.querySelector(".shortsLockupViewModelHostOutsideMetadataTitle a[title]");
     const channelName = text(card.querySelector(".ytmBadgeAndBylineRendererItemByline"))
       || (lockupChannel ? lockupChannel.getAttribute("title") : null)
-      || channelFromAria(card);
+      || channelFromAria(card)
+      // A lockup without a channel avatar names the channel first in its metadata rows.
+      || (tag === LOCKUP ? text(card.querySelector('yt-content-metadata-view-model [class*="MetadataText"]')) : null);
     let title = text(titleEl);
     if (!title && label === "channel") {
       title = channelFromAria(card) || text(card.querySelector("h4, [role=heading]"))
@@ -174,7 +188,7 @@
     }
     const channelLink = card.querySelector('ytw-channel-thumbnail-with-link-renderer a[href], a[href^="/@"], a[href^="/channel/"]');
     const shelf = card.closest("grid-shelf-view-model, ytm-reel-shelf-renderer");
-    const thumb = card.querySelector("a.media-item-thumbnail-container, .shortsLockupViewModelHostThumbnailContainer, img");
+    const thumb = card.querySelector("a.media-item-thumbnail-container, .shortsLockupViewModelHostThumbnailContainer, yt-thumbnail-view-model, img");
     const thumbRect = thumb ? thumb.getBoundingClientRect() : null;
 
     items.push({

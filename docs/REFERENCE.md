@@ -28,7 +28,7 @@ The browser is Playwright Chromium with a phone profile (Pixel 7 by default, iPh
 3. For each round:
    1. Check the content location YouTube applies on the page (`round.location`), then take the "on arrival" screenshot.
    2. On a watch page, stay on the video for the watch time (`watch_dwell_ms`, 6 s by default) while sampling the player for ads. A stop request cuts the watch short (`watch_cut_short` on the round).
-   3. Read the feed card by card: the search results, or every `related-items` section of a watch page. The top-bar "Open App" link, hidden chapter links, the companion ad slot and the playing video itself are never counted. Scroll to the end of the feed so YouTube loads more, until the scan depth (number of normal videos) is reached or loading stops.
+   3. Read the feed card by card: the search results, or every `related-items` section of a watch page. Video cards come in two layouts, the older `ytm-video-with-context-renderer` and the newer `yt-lockup-view-model` that YouTube gives some visitors; both are read, and `card_tag` says which one was shown. The top-bar "Open App" link, hidden chapter links, the companion ad slot and the playing video itself are never counted. Scroll to the end of the feed so YouTube loads more, until the scan depth (number of normal videos) is reached or loading stops.
    4. Label each card (`normal_video`, `short`, `ad`, `live`, `upcoming`, `movie`, `playlist`, `mix`, `channel`), join YouTube's page data and, if a key is configured, YouTube Data API metadata.
    5. Select the next normal video (`top_1` or `random`), screenshot the selected card with a red outline, and save the round.
    6. Tap the selected card (falling back to opening its URL), and wait until the watch page and its related list belong to the new video.
@@ -97,7 +97,7 @@ The exclude policy decides which videos can no longer be selected: `displayed` (
 ## Metadata sources
 
 - The browser page (DOM) is the record of what was shown and where: titles, channels, durations, positions.
-- YouTube's page data (InnerTube JSON) adds channel ids, view count text and Shorts endpoints (`result.innertube`), without an API key.
+- YouTube's page data (InnerTube JSON) adds channel ids, view count text and Shorts endpoints (`result.innertube`), without an API key. It is read from the older video renderers and from the newer `lockupViewModel` (`innertube.renderer` says which).
 - With a YouTube Data API key, `videos.list` fills authoritative metadata (publish date, exact counts, tags). `metadata_source` says which applied; the observed title/channel/URL are kept in `browser_observation`.
 
 ## Data model

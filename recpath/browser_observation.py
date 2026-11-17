@@ -693,7 +693,7 @@ def presentation_of(item: dict[str, Any]) -> str:
         return "shorts_shelf" if item.get("label") == "short" else "shelf"
     if "shorts" in card_tag or "reel" in card_tag or "/shorts/" in (item.get("observed_url") or ""):
         return "shorts_card"
-    if "video" in card_tag:
+    if "video" in card_tag or card_tag == "yt-lockup-view-model":
         return "video_card"
     return "other"
 

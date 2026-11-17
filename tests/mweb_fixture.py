@@ -5,7 +5,9 @@ traps the extractor must avoid: the top-bar "Open App" link to the playing video
 chapter link, a companion ad, an in-feed ad card, a LIVE card, an ordinary video linked as a
 radio start (&list=RD<id>&start_radio=1), and recommendations split over several
 "related-items" sections. Optional extras: a player showing an ad, YouTube's embedded page data
-(an ad schedule and a related video that is really a Short), and a small Shorts feed.
+(an ad schedule and a related video that is really a Short), a small Shorts feed, and the
+"lockup" layout, where the same videos come as yt-lockup-view-model cards (the newer card some
+visitors get), with a playlist, a Mix and a card without a channel avatar added to the search page.
 """
 from __future__ import annotations
 
@@ -22,8 +24,10 @@ VIDEO_ID_RE = re.compile(r"watch\?v=([\w-]{11})")
 STYLE = """<style>
 ytm-app, ytm-watch, ytm-search, ytm-section-list-renderer, ytm-item-section-renderer, lazy-list,
 ytm-single-column-watch-next-results-renderer, ytm-video-with-context-renderer, ytm-ad-slot-renderer,
-grid-shelf-view-model, ytm-mobile-topbar-renderer { display: block; }
-ytm-video-with-context-renderer, ytm-ad-slot-renderer { min-height: 220px; }
+grid-shelf-view-model, ytm-mobile-topbar-renderer, yt-lockup-view-model, .ytLockupViewModelContentImage,
+yt-thumbnail-view-model { display: block; }
+ytm-video-with-context-renderer, ytm-ad-slot-renderer, yt-lockup-view-model { min-height: 220px; }
+yt-thumbnail-view-model { width: 160px; height: 90px; }
 </style>"""
 
 def consent_dialog(mode: str = "normal") -> str:
@@ -133,9 +137,60 @@ def page(body: str) -> str:
     )
 
 
-def search_page(*, consent: str | None = "normal") -> str:
+def lockup_card(
+    video_id: str,
+    *,
+    href: str | None = None,
+    badge: str | None = "12:34",
+    channel: str | None = None,
+    avatar: bool = True,
+) -> str:
+    """A yt-lockup-view-model card, from the template captured on a live mobile page."""
+    channel = channel or f"Lockup channel {video_id[:4]}"
+    card = CARDS["lockup_card"]
+    if not avatar:
+        card = re.sub(r'<div class="ytLockupMetadataViewModelAvatar">.*?</yt-decorated-avatar-view-model></div>', "", card)
+    badge_html = (
+        CARDS["lockup_badge"].replace("__BADGE_TEXT__", badge).replace("__BADGE_LABEL__", badge) if badge else ""
+    )
+    return (
+        card.replace("__BADGE__", badge_html)
+        .replace("__HREF__", href or f"/watch?v={video_id}&amp;pp=0gcJCdgAo7VqN5tD")
+        .replace("__VIDEO_ID__", video_id)
+        .replace("__TITLE__", f"Lockup video {video_id}")
+        .replace("__CHANNEL__", channel)
+        .replace("__VIEWS__", "12K views")
+    )
+
+
+def as_lockup(card_html: str) -> str:
+    """The same video as a lockup card: same link (list parameters included), LIVE kept."""
+    href = re.search(r'href="(/watch\?v=[^"]+)"', card_html).group(1)
+    badge = "LIVE" if 'data-style="LIVE"' in card_html else "12:34"
+    return lockup_card(card_video_id(card_html), href=href, badge=badge)
+
+
+LOCKUP_PLAYLIST_ID = "PLfixturePlaylist01"
+LOCKUP_MIX_VIDEO_ID = "MixLockup01"
+LOCKUP_NO_AVATAR_VIDEO_ID = "NoAvatar001"
+LOCKUP_EXTRAS = (
+    lockup_card("PlaylistLk1", href=f"/playlist?list={LOCKUP_PLAYLIST_ID}", badge=None)
+    + lockup_card(
+        LOCKUP_MIX_VIDEO_ID,
+        href=f"/watch?v={LOCKUP_MIX_VIDEO_ID}&amp;list=RD{LOCKUP_MIX_VIDEO_ID}&amp;start_radio=1",
+        badge="Mix",
+    )
+    + lockup_card(LOCKUP_NO_AVATAR_VIDEO_ID, channel="Rows only channel", avatar=False)
+)
+
+
+def search_page(*, consent: str | None = "normal", layout: str = "legacy") -> str:
     cards = CARDS["search_cards"]
+    if layout == "lockup":
+        cards = [as_lockup(card) for card in cards]
     feed = cards[0] + CARDS["shorts_shelf"] + "".join(cards[1:3]) + AD_CARD + "".join(cards[3:])
+    if layout == "lockup":
+        feed += LOCKUP_EXTRAS
     return page(
         topbar(None)
         + (consent_dialog(consent) if consent else "")
@@ -195,6 +250,7 @@ def watch_page(
     related: bool = True,
     player_ad: bool = False,
     page_data: bool = False,
+    layout: str = "legacy",
 ) -> str:
     cards = list(CARDS["watch_cards"])
     # Rotate per video so consecutive watch pages show different related lists.
@@ -203,6 +259,9 @@ def watch_page(
     playing_card = cards[0].replace(card_video_id(cards[0]), current_video_id)
     live_card = live_variant(CARDS["search_cards"][1])
     cards = [radio_start_variant(card) if card_video_id(card) == RADIO_START_VIDEO_ID else card for card in cards]
+    if layout == "lockup":
+        playing_card, live_card = as_lockup(playing_card), as_lockup(live_card)
+        cards = [as_lockup(card) for card in cards]
     sections = [
         "".join(cards[:2]),
         "",
@@ -238,12 +297,13 @@ def route_handler(
     player_ad: bool = False,
     page_data: bool = False,
     ip_location: str | None = "IE",
+    layout: str = "legacy",
 ) -> None:
     """Serve fixture pages for m.youtube.com documents and block everything else.
 
     The cookie dialog is shown until the SOCS cookie is set, on search and watch pages alike.
     Every page carries YouTube's client config with its content location (see client_config),
-    unless ip_location is None.
+    unless ip_location is None. layout "lockup" serves the cards as yt-lockup-view-model.
     """
     request = route.request
     parsed = urlparse(request.url)
@@ -252,13 +312,15 @@ def route_handler(
         return
     dialog = None if "SOCS=" in (request.headers.get("cookie") or "") else consent
     if parsed.path == "/results":
-        body = search_page(consent=dialog)
+        body = search_page(consent=dialog, layout=layout)
     elif parsed.path == "/watch":
         video_id = parse_qs(parsed.query)["v"][0]
         if video_id in abort_video_ids:
             route.abort()
             return
-        body = watch_page(video_id, consent=dialog, related=related, player_ad=player_ad, page_data=page_data)
+        body = watch_page(
+            video_id, consent=dialog, related=related, player_ad=player_ad, page_data=page_data, layout=layout
+        )
     elif parsed.path.startswith("/shorts/"):
         body = shorts_page(parsed.path.split("/")[2])
     else:

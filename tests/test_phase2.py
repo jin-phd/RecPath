@@ -1,4 +1,7 @@
+import copy
+import json
 import unittest
+from pathlib import Path
 
 from recpath.ads import ad_texts, distinct_player_ads, record_ad_sample, same_ad, scheduled_ads
 from recpath.browser_observation import classify_shorts
@@ -140,6 +143,37 @@ class InnerTubeTests(unittest.TestCase):
         self.assertEqual(enriched[0]["channel_id"], "UC1")
         self.assertEqual(enriched[0]["innertube"]["view_count_text"], "1.2K views")
         self.assertNotIn("innertube", enriched[1])
+
+    def test_lockup_view_model_items_are_indexed(self):
+        cards = json.loads((Path(__file__).parent / "fixtures" / "mweb_cards.json").read_text(encoding="utf-8"))
+        video = cards["lockup_view_model"]  # captured from a live mobile page
+        live = copy.deepcopy(video)
+        live["contentId"] = "live0000001"
+        live["rendererContext"]["commandContext"]["onTap"]["innertubeCommand"]["watchEndpoint"]["videoId"] = "live0000001"
+        badge = live["contentImage"]["thumbnailViewModel"]["overlays"][0]["thumbnailBottomOverlayViewModel"]["badges"][0]
+        badge["thumbnailBadgeViewModel"].update(text="LIVE", badgeStyle="THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE")
+        reel = copy.deepcopy(video)
+        reel["contentId"] = "reel0000001"
+        reel["rendererContext"]["commandContext"]["onTap"]["innertubeCommand"] = {
+            "reelWatchEndpoint": {"videoId": "reel0000001"}
+        }
+        playlist = {**copy.deepcopy(video), "contentId": "PLx", "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST"}
+        recorder = InnerTubeRecorder()
+        recorder.ingest({"contents": [{"lockupViewModel": item} for item in (video, live, reel, playlist)]})
+
+        item = recorder.items["KlIL63MeyMY"]
+        self.assertEqual(item["renderer"], "lockupViewModel")
+        self.assertEqual(item["endpoint"], "watch")
+        self.assertEqual(item["channel_id"], "UCrWvhVmt0Qac3HgsjQK62FQ")
+        self.assertEqual(item["channel_name"], "Curso em Vídeo")
+        self.assertEqual(item["length_text"], "37:59")
+        self.assertEqual(item["view_count_text"], "1.8m views")
+        self.assertEqual(item["published_text"], "10 years ago")
+        self.assertEqual(item["style"], "DEFAULT")
+        self.assertEqual(recorder.items["live0000001"]["style"], "LIVE")
+        self.assertNotIn("length_text", recorder.items["live0000001"])
+        self.assertEqual(recorder.items["reel0000001"]["endpoint"], "reel")
+        self.assertEqual(set(recorder.items), {"KlIL63MeyMY", "live0000001", "reel0000001"})
 
     def test_parse_json_parts_handles_streamed_bodies(self):
         self.assertEqual(parse_json_parts('{"a": 1}'), {"a": 1})

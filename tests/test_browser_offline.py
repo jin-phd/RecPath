@@ -63,6 +63,9 @@ class FeedExtractorTests(unittest.TestCase):
         cls.context = cls.browser.new_context(**device)
         cls.context.route("**/*", mweb_fixture.route_handler)
         cls.page = cls.context.new_page()
+        cls.lockup_context = cls.browser.new_context(**device)
+        cls.lockup_context.route("**/*", mweb_fixture.make_route_handler(layout="lockup"))
+        cls.lockup_page = cls.lockup_context.new_page()
 
     @classmethod
     def tearDownClass(cls):
@@ -144,6 +147,56 @@ class FeedExtractorTests(unittest.TestCase):
         self.assertTrue(all(item["shelf"] for item in shorts))
         self.assertTrue(all(item["channel_name"] for item in shorts))
 
+    def read_lockup(self, url, page_kind):
+        self.lockup_page.goto(url)
+        return bo.read_feed(self.lockup_page, page_kind)
+
+    def test_lockup_search_feed_reads_videos_playlists_and_mixes(self):
+        feed = self.read_lockup("https://m.youtube.com/results?search_query=cats", "search")
+        self.assertEqual(feed["unmatched_links"]["count"], 0)
+        normal = [item for item in feed["items"] if item["label"] == "normal_video"]
+        self.assertEqual(
+            [item["video_id"] for item in normal],
+            mweb_fixture.SEARCH_VIDEO_IDS + [mweb_fixture.LOCKUP_NO_AVATAR_VIDEO_ID],
+        )
+        for item in normal:
+            self.assertEqual(item["card_tag"], "yt-lockup-view-model")
+            self.assertEqual(item["title"], f"Lockup video {item['video_id']}")
+            self.assertTrue(item["title_aria"].startswith(item["title"]))
+            self.assertEqual((item["duration_text"], item["time_style"]), ("12:34", "DEFAULT"))
+            self.assertAlmostEqual(item["thumb_aspect"], 0.56, places=2)
+        channels = {item["video_id"]: item["channel_name"] for item in normal}
+        self.assertEqual(channels[mweb_fixture.LOCKUP_NO_AVATAR_VIDEO_ID], "Rows only channel")  # from the rows
+        first = mweb_fixture.SEARCH_VIDEO_IDS[0]
+        self.assertEqual(channels[first], f"Lockup channel {first[:4]}")  # from the avatar
+        labels = {item["playlist_id"] or item["video_id"]: item["label"] for item in feed["items"]}
+        self.assertEqual(labels[mweb_fixture.LOCKUP_PLAYLIST_ID], "playlist")
+        self.assertEqual(labels[f"RD{mweb_fixture.LOCKUP_MIX_VIDEO_ID}"], "mix")  # its "Mix" badge is no duration
+        self.assertIn("short", labels.values())  # the Shorts shelf is unchanged
+        self.assertIn("ad", labels.values())
+
+    def test_lockup_watch_feed_reads_every_related_card(self):
+        current = "CURRENTlck1"
+        feed = self.read_lockup(f"https://m.youtube.com/watch?v={current}", "watch")
+        self.assertEqual(feed["unmatched_links"]["count"], 0)
+        ids = [item["video_id"] for item in feed["items"]]
+        for video_id in mweb_fixture.WATCH_VIDEO_IDS:
+            self.assertIn(video_id, ids)
+        self.assertIn(current, ids)  # the playing video's own card, dropped later by normalize_feed_items
+        live = [item for item in feed["items"] if item["label"] == "live"]
+        self.assertEqual([(item["duration_text"], item["time_style"]) for item in live], [("LIVE", "LIVE")])
+        radio = next(i for i in feed["items"] if i["video_id"] == mweb_fixture.RADIO_START_VIDEO_ID)
+        self.assertEqual(radio["label"], "normal_video")  # it has a duration, so it is no Mix
+        self.assertTrue(radio["start_radio"])
+
+    def test_mark_and_link_find_a_lockup_card(self):
+        self.lockup_page.goto("https://m.youtube.com/results?search_query=cats")
+        video_id = mweb_fixture.SEARCH_VIDEO_IDS[1]
+        args = {"pageKind": "search", "videoId": video_id}
+        self.assertTrue(self.lockup_page.evaluate(bo.FEED_CARDS_JS, {"mode": "mark", **args}))
+        link = self.lockup_page.evaluate_handle(bo.FEED_CARDS_JS, {"mode": "link", **args}).as_element()
+        self.assertIn(video_id, link.get_attribute("href"))
+
     def test_mark_and_link_find_the_selected_card(self):
         self.page.goto("https://m.youtube.com/results?search_query=cats")
         video_id = mweb_fixture.SEARCH_VIDEO_IDS[2]
@@ -222,6 +275,20 @@ class RunnerOfflineTests(unittest.TestCase):
                     [item["video_id"] for item in round_record["results"]],
                 )
         self.assertIn("ad", first["label_counts"])
+
+    def test_chain_runs_on_lockup_cards(self):
+        self.serve(layout="lockup")
+        session = self.run_chain(fast_settings())
+        self.assertEqual(session["status"], "completed", session["error"])
+        self.assertEqual(len(session["rounds"]), 3)
+        for round_record in session["rounds"]:
+            normal = [item for item in round_record["results"] if item["label"] == "normal_video"]
+            self.assertTrue(normal)
+            for item in normal:
+                self.assertEqual((item["card_tag"], item["presentation"]), ("yt-lockup-view-model", "video_card"))
+                self.assertTrue(item["channel_name"])
+                self.assertEqual(item["duration_seconds"], 754)
+        self.assertEqual(session["rounds"][1]["navigation"]["method"], "tap")
 
     def test_failed_navigation_keeps_finished_rounds_and_its_record(self):
         first_pick = mweb_fixture.SEARCH_VIDEO_IDS[0]

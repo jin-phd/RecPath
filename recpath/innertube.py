@@ -16,6 +16,8 @@ from typing import Any
 ENDPOINT_RE = re.compile(r"/youtubei/v1/(search|next|player|get_watch|reel/reel_item_watch|reel/reel_watch_sequence)\b")
 VIDEO_RENDERERS = ("videoWithContextRenderer", "compactVideoRenderer", "videoRenderer")
 SHORTS_RENDERERS = ("shortsLockupViewModel", "reelItemRenderer")
+LOCKUP_RENDERERS = ("lockupViewModel",)
+DURATION_RE = re.compile(r"^(\d+:)?\d{1,2}:\d{2}$")
 MAX_PLAYER_RESPONSES = 40
 
 
@@ -34,7 +36,7 @@ def text_of(node: Any) -> str | None:
 def walk_renderers(node: Any, found: list[tuple[str, dict[str, Any]]]) -> None:
     if isinstance(node, dict):
         for key, value in node.items():
-            if key in VIDEO_RENDERERS + SHORTS_RENDERERS and isinstance(value, dict):
+            if key in VIDEO_RENDERERS + SHORTS_RENDERERS + LOCKUP_RENDERERS and isinstance(value, dict):
                 found.append((key, value))
             walk_renderers(value, found)
     elif isinstance(node, list):
@@ -42,7 +44,54 @@ def walk_renderers(node: Any, found: list[tuple[str, dict[str, Any]]]) -> None:
             walk_renderers(value, found)
 
 
+def dig(node: Any, *keys: str) -> Any:
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
+def describe_lockup(lockup: dict[str, Any]) -> dict[str, Any] | None:
+    """lockupViewModel, the newer card: the video, its channel avatar, metadata rows and badges."""
+    if lockup.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+        return None  # playlists, mixes and channels are not video items
+    command = dig(lockup, "rendererContext", "commandContext", "onTap", "innertubeCommand") or {}
+    reel = command.get("reelWatchEndpoint")
+    video_id = (reel or command.get("watchEndpoint") or {}).get("videoId") or lockup.get("contentId")
+    if not video_id:
+        return None
+    metadata = dig(lockup, "metadata", "lockupMetadataViewModel") or {}
+    rows = dig(metadata, "metadata", "contentMetadataViewModel", "metadataRows") or []
+    parts = [text_of(part.get("text")) for row in rows for part in row.get("metadataParts") or [] if isinstance(part, dict)]
+    parts = [part for part in parts if part]
+    badges = [
+        badge.get("thumbnailBadgeViewModel") or {}
+        for overlay in dig(lockup, "contentImage", "thumbnailViewModel", "overlays") or []
+        for badge in dig(overlay, "thumbnailBottomOverlayViewModel", "badges") or []
+        if isinstance(badge, dict)
+    ]
+    length = next((badge for badge in badges if DURATION_RE.match(badge.get("text") or "")), None)
+    styled = next((badge for badge in badges if badge.get("badgeStyle")), None)
+    avatar_command = dig(
+        metadata, "image", "decoratedAvatarViewModel", "rendererContext", "commandContext", "onTap", "innertubeCommand"
+    ) or {}
+    return {
+        "video_id": video_id,
+        "renderer": "lockupViewModel",
+        "endpoint": "reel" if reel else "watch",
+        "channel_id": dig(avatar_command, "browseEndpoint", "browseId"),
+        "channel_name": parts[0] if parts else None,
+        "length_text": length.get("text") if length else None,
+        "view_count_text": next((part for part in parts if re.search(r"\b(views?|watching)\b", part, re.I)), None),
+        "published_text": next((part for part in parts if re.search(r"\bago\b|^(Streamed|Premiered)\b", part, re.I)), None),
+        "style": styled["badgeStyle"].removeprefix("THUMBNAIL_OVERLAY_BADGE_STYLE_") if styled else None,
+    }
+
+
 def describe_renderer(kind: str, renderer: dict[str, Any]) -> dict[str, Any] | None:
+    if kind in LOCKUP_RENDERERS:
+        return describe_lockup(renderer)
     if kind in SHORTS_RENDERERS:
         endpoint = (
             ((renderer.get("onTap") or {}).get("innertubeCommand") or {}).get("reelWatchEndpoint")
