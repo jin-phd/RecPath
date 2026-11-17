@@ -2,7 +2,7 @@
 
 RecPath watches YouTube the way someone on a phone does and records what YouTube recommends. You type a search query; the app opens mobile YouTube (`m.youtube.com`) in a phone-emulated browser, picks a video from the results, then follows the recommendations round by round. You see the phone screen live while it runs, and every round is saved with screenshots, the full list of what was shown, and any ads.
 
-It is a small, controlled research tool: one anonymous, logged-out visitor per run, a few rounds at a time, never liking, commenting, subscribing or tapping ads.
+It is a web-based extension of the ARTAI platform: one anonymous, logged-out visitor per run, a few rounds at a time, never liking, commenting, subscribing or tapping ads.
 
 ![The New run page](docs/images/new-run.png)
 
